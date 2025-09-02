@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Budget AI</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <h1>Budget AI</h1>
+    <form id="upload-form" action="/uploadfile/" method="post" enctype="multipart/form-data">
+        <input type="file" name="csv_file" accept=".csv">
+        <input type="number" name="monthly_inflow" placeholder="Monthly Inflow">
+        <button type="submit">Get Recommendations</button>
+    </form>
+    <div id="recommendations"></div>
+
+    <div id="chat-container">
+        <div id="chat-box"></div>
+        <input id="chat-input" type="text" placeholder="Ask a question...">
+        <button id="chat-submit">Send</button>
+    </div>
+
+    <script>
+        document.getElementById("upload-form").addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const response = await fetch("/uploadfile/", {
+                method: "POST",
+                body: formData
+            });
+            const result = await response.json();
+            const recommendationsDiv = document.getElementById("recommendations");
+            recommendationsDiv.innerHTML = "";
+            if (result.error) {
+                recommendationsDiv.innerHTML = `<p>Error: ${result.error}</p>`;
+            } else {
+                const ul = document.createElement("ul");
+                result.recommendations.forEach(rec => {
+                    const li = document.createElement("li");
+                    li.textContent = rec;
+                    ul.appendChild(li);
+                });
+                recommendationsDiv.appendChild(ul);
+            }
+        });
+
+        document.getElementById("chat-submit").addEventListener("click", async () => {
+            const chatInput = document.getElementById("chat-input");
+            const message = chatInput.value;
+            chatInput.value = "";
+
+            const chatBox = document.getElementById("chat-box");
+            const userMessage = document.createElement("p");
+            userMessage.textContent = `You: ${message}`;
+            chatBox.appendChild(userMessage);
+
+            const thinkingMessage = document.createElement("p");
+            thinkingMessage.id = "thinking-message";
+            thinkingMessage.textContent = "Bot is thinking...";
+            chatBox.appendChild(thinkingMessage);
+
+            const response = await fetch("/chat", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({ message })
+            });
+
+            const result = await response.json();
+            chatBox.removeChild(thinkingMessage);
+            const botMessage = document.createElement("p");
+            botMessage.innerHTML = `Bot: ${result.response}`;
+            chatBox.appendChild(botMessage);
+        });
+    </script>
+</body>
+</html>
