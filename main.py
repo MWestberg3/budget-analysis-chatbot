@@ -4,6 +4,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_experimental.agents.agent_toolkits import create_pandas_dataframe_agent
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.memory import ConversationBufferMemory
 import os
 import io
 
@@ -14,6 +15,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 df_global = None
 monthly_inflow_global = 0
 agent = None
+memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
 
 @app.get("/", response_class=HTMLResponse)
 async def main():
@@ -22,7 +24,7 @@ async def main():
 
 @app.post("/uploadfile/")
 async def create_upload_file(csv_file: UploadFile = File(...), monthly_inflow: float = Form(...)):
-    global df_global, monthly_inflow_global, agent
+    global df_global, monthly_inflow_global, agent, memory
     try:
         if not os.environ.get("GOOGLE_API_KEY"):
             return {"error": "GOOGLE_API_KEY environment variable not set."}
@@ -38,17 +40,27 @@ async def create_upload_file(csv_file: UploadFile = File(...), monthly_inflow: f
         print(df.info())
 
         # Basic data validation
-        if 'Outflow' not in df.columns or 'Category' not in df.columns or 'Category Group' not in df.columns:
-            return {"error": "CSV must have 'Outflow', 'Category', and 'Category Group' columns"}
+        if 'Outflow' not in df.columns or 'Category' not in df.columns or 'Category Group' not in df.columns or 'Date' not in df.columns:
+            return {"error": "CSV must have 'Outflow', 'Category', 'Category Group', and 'Date' columns"}
 
         # Preprocessing
         df['Outflow'] = df['Outflow'].replace({r'\$': ''}, regex=True)
         df['Outflow'] = pd.to_numeric(df['Outflow'], errors='coerce')
         df.dropna(subset=['Outflow'], inplace=True)
+
+        # Convert 'Date' column to datetime objects
+        df['Date'] = pd.to_datetime(df['Date'], format='%m/%d/%Y')
+        df['Month'] = df['Date'].dt.month
+        df['Year'] = df['Date'].dt.year
         
         # Create a langchain agent
         llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", temperature=0)
-        agent = create_pandas_dataframe_agent(llm, df, verbose=True, allow_dangerous_code=True)
+        agent = create_pandas_dataframe_agent(llm, df, verbose=True, allow_dangerous_code=True,
+                                            agent_kwargs={
+                                                "system_message": "You are a friendly and helpful AI assistant that can analyze spending habits from a CSV file. The CSV file contains 'Outflow', 'Category', 'Category Group', 'Date', 'Month', and 'Year' columns. When asked about dates, use the 'Date', 'Month', and 'Year' columns. Feel free to ask clarifying questions or offer further insights based on the data."
+                                            },
+                                            memory=memory,
+                                            prefix="You are a friendly and helpful AI assistant that can analyze spending habits from a CSV file. The CSV file contains 'Outflow', 'Category', 'Category Group', 'Date', 'Month', and 'Year' columns. When asked about dates, use the 'Date', 'Month', and 'Year' columns. Feel free to ask clarifying questions or offer further insights based on the data.")
 
         # 50/30/20 Rule Analysis
         needs_spending = df[df['Category Group'] == 'Needs']['Outflow'].sum()
